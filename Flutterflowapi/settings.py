@@ -131,7 +131,7 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField' 
 
 # Firebase Admin SDK setup
-FIREBASE_KEY_PATH = os.path.join(BASE_DIR, r'C:\Users\Muhammad Arslan\Desktop\UPDATED REDZ API CHECK\File Upload API\Flutterflowapi\active.json')
+FIREBASE_KEY_PATH = os.path.join(BASE_DIR, 'Flutterflowapi/active.json')
 
 cred = credentials.Certificate(FIREBASE_KEY_PATH)
 firebase_admin.initialize_app(cred)
