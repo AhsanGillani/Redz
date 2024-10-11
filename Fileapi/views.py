@@ -10,26 +10,10 @@ from tempfile import NamedTemporaryFile
 from Fileapi.firebase_utils import insert_data_batch_to_firestore
 from concurrent.futures import ThreadPoolExecutor
 from firebase_admin import firestore
-
 import io
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
