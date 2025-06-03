@@ -310,11 +310,147 @@ class FilePathUploadView(APIView):
 
 
 
+# Authenticate and create a Google Drive service instance
+def authenticate_google_drive():
+    # Replace 'key.json' with the actual path to your key.json file
+    credentials = Credentials.from_service_account_file('Fileapi//key.json', scopes=["https://www.googleapis.com/auth/drive"])
+    drive_service = build('drive', 'v3', credentials=credentials)
+    return drive_service
 
+# Function to fetch project details from SiteCapture API
+def get_project_details(project_id, headers):
+    url = f"https://api.sitecapture.com/customer_api/2_0/project/{project_id}"
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json()  # Return project data in JSON format
+    else:
+        print(f"Failed to fetch project details: {response.status_code}, {response.text}")
+        return None
 
+# Function to extract media IDs section-wise from project details
+def extract_media_ids(project_data):
+    media_dict = {}
+    
+    for item in project_data.get('fields', []):
+        section_key = item.get('section_key')
+        media_list = item.get('media', [])
+        
+        # Store media IDs section-wise
+        if media_list:
+            if section_key not in media_dict:
+                media_dict[section_key] = []
+            for media in media_list:
+                media_dict[section_key].append(media.get('id'))
+    
+    return media_dict
 
+# Function to download image data from SiteCapture
+def get_image_data(media_id, headers):
+    sitecapture_url = f'https://api.sitecapture.com/customer_api/1_0/media/image/{media_id}'
+    response = requests.get(sitecapture_url, headers=headers)
+    
+    if response.status_code == 200:
+        return response.content  # Return binary image data
+    else:
+        print(f"Failed to retrieve image data: {response.status_code}, {response.text}")
+        return None
 
+# Function to upload image to Google Drive and make it public
+def upload_to_google_drive(drive_service, image_data, filename):
+    # Convert the image binary data into a file-like object
+    image_stream = io.BytesIO(image_data)
+    media = MediaIoBaseUpload(image_stream, mimetype='image/jpeg')
+    
+    # File metadata, such as the file name
+    file_metadata = {'name': filename}
+    
+    # Upload the file to Google Drive
+    file = drive_service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id'
+    ).execute()
+    
+    # Get the file ID of the uploaded image
+    file_id = file.get('id')
+    
+    # Make the file public by setting permissions
+    permission = {
+        'type': 'anyone',
+        'role': 'reader'
+    }
+    
+    drive_service.permissions().create(
+        fileId=file_id,
+        body=permission
+    ).execute()
+    
+    # Return the public URL of the file
+    return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
 
+# Function to post the section-wise image URLs to Podio webhook
+def post_to_podio(webhook_url, data):
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
+    response = requests.post(webhook_url, json=data, headers=headers)
+    if response.status_code == 200:
+        print("Successfully posted to Podio webhook.")
+    else:
+        print(f"Failed to post to Podio webhook: {response.status_code}, {response.text}")
 
+class ProjectImageUploadView(APIView):
+    def post(self, request, *args, **kwargs):
+        project_id = request.data.get('project_id')
 
+        if not project_id:
+            return Response({"error": "Project ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            # Step 1: Set up the headers for authorization
+            headers = {
+                'Authorization': 'Basic YXBwbGljYXRpb25zQG15LXNtYXJ0aG91c2UuY29tOmFkbWluNG15c21hcnRob3VzZQ',  # Replace with actual auth
+                'API_KEY': 'NVN6IIEZ4DZE'  # Replace with actual API key
+            }
+
+            # Authenticate Google Drive
+            drive_service = authenticate_google_drive()
+
+            # Step 2: Fetch project details from SiteCapture
+            project_data = get_project_details(project_id, headers)
+
+            if not project_data:
+                return Response({"error": "Failed to fetch project details."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Step 3: Extract media IDs section-wise
+            media_ids_by_section = extract_media_ids(project_data)
+
+            # Step 4: For each media ID, download the image, upload to Google Drive, and store the URLs section-wise
+            section_image_urls = {}
+
+            for section, media_ids in media_ids_by_section.items():
+                section_image_urls[section] = []
+                
+                for media_id in media_ids:
+                    # Download the image
+                    image_data = get_image_data(media_id, headers)
+                    if image_data:
+                        # Upload the image to Google Drive and get the URL
+                        image_url = upload_to_google_drive(drive_service, image_data, f"media_{media_id}.jpg")
+                        
+                        # Add the image URL to the section
+                        section_image_urls[section].append({
+                            "media_id": media_id,
+                            "url": image_url
+                        })
+
+            # Step 5: Post the section-wise image URLs to Podio webhook
+            podio_webhook_url = "https://workflow-automation.podio.com/catch/lzy6tsm2irt48l9"  # Replace with actual webhook URL
+            post_to_podio(podio_webhook_url, section_image_urls)
+
+            return Response({"success": "Images uploaded and webhook posted successfully.", "data": section_image_urls}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
